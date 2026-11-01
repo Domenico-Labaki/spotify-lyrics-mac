@@ -12,7 +12,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.spotifylyrics.menubar</string>
 <key>CFBundleName</key><string>Spotify Lyrics</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1</string>
+<key>CFBundleShortVersionString</key><string>0.1.1</string>
 <key>LSUIElement</key><true/>
 <key>NSAppleEventsUsageDescription</key><string>Spotify Lyrics reads the current track and playback position to display its timed lyrics.</string>
 </dict></plist>

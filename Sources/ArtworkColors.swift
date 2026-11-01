@@ -35,9 +35,9 @@ enum ArtworkColors {
             return entry.value >= max(3, first.value / 20) && distance >= 0.42
         }
         func color(_ v: (Double, Double, Double)) -> NSColor {
-            NSColor(srgbRed: v.0, green: v.1, blue: v.2, alpha: 0.12)
+            NSColor(srgbRed: v.0, green: v.1, blue: v.2, alpha: 0.20)
         }
         // A monochrome cover gets a neutral second stop, not an invented hue.
-        return [color(one), second.map { color(rgb($0.key)) } ?? NSColor.labelColor.withAlphaComponent(0.05)]
+        return [color(one), second.map { color(rgb($0.key)) } ?? NSColor.labelColor.withAlphaComponent(0.08)]
     }
 }

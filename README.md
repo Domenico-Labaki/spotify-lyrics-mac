@@ -19,7 +19,7 @@ A small native menu bar app that displays the current lyric line while Spotify p
 
 ## Install
 
-1. Download `Spotify-Lyrics-mac-v0.1.0.zip` from the [latest release](https://github.com/Domenico-Labaki/spotify-lyrics-mac/releases/latest) and unzip it.
+1. Download the app ZIP from the [latest release](https://github.com/Domenico-Labaki/spotify-lyrics-mac/releases/latest) and unzip it.
 2. Move **Spotify Lyrics.app** to a permanent location such as Applications before launching it, particularly if you want it to start at login.
 3. Open the app and allow it to control Spotify when macOS asks. The app reads playback information; it does not change playback.
 4. Play a song in Spotify. Look for its lyric line or ♪ in the menu bar. Click the item for the Quit command.
