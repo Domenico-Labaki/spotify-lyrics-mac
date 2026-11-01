@@ -43,3 +43,21 @@ enum LyricsText {
         return lines.sorted { $0.time < $1.time }
     }
 }
+
+enum OpeningDisplay {
+    static func isInstrumental(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        let markers: Set<String> = ["instrumental", "[instrumental]", "(instrumental)", "♪", "♫", "🎵", "🎶"]
+        if markers.contains(trimmed.lowercased()) { return true }
+        let notes = CharacterSet(charactersIn: "♪♫♬♩🎵🎶 \t")
+        return trimmed.unicodeScalars.allSatisfy { notes.contains($0) }
+    }
+
+    static func showTitle(lines: [Line], position: Double) -> Bool {
+        guard position >= 0 else { return false }
+        if lines.isEmpty { return true }
+        guard let first = lines.first(where: { !isInstrumental($0.text) }) else { return true }
+        return position < first.time
+    }
+}

@@ -4,10 +4,10 @@ A small native menu bar app that displays the current lyric line while Spotify p
 
 ## Features
 
-- Displays provider-timed lyrics in a fixed-width menu bar item.
+- Displays provider-timed lyrics in a fixed-width menu bar item, with the song title when lyrics are unavailable or during a recognized instrumental intro.
 - Animates transitions between lines and scrolls long lines during their available time. macOS Reduce Motion disables these animations.
 - Tints the lyric background with a subtle, translucent gradient based on the album cover.
-- Collapses to a music note when no timed lyrics are available.
+- Shows the song title when timed lyrics are unavailable; collapses to a music note when Spotify is paused or closed.
 - Caches successful lyrics and artwork locally for 30 days, up to 200 entries per cache; temporary lookup failures are retried while the track is playing.
 - Requests registration as a login item when launched.
 
@@ -40,7 +40,7 @@ Cached lyric text and artwork are stored in `~/Library/Caches/SpotifyLyrics/`. T
 
 ## Troubleshooting
 
-- **Only ♪ appears:** Spotify may be paused, the current line may be empty, timed lyrics may not be available, or the lyrics service may be temporarily unavailable. Hover over the item for its status. Temporary service errors are retried every five seconds while the same track plays.
+- **Song title or ♪ appears:** Spotify may be paused, the current line may be empty, timed lyrics may not be available, or the lyrics service may be temporarily unavailable. Hover over the item for its status. Temporary service errors are retried every five seconds while the same track plays.
 - **No permission prompt or no playback data:** Check **System Settings → Privacy & Security → Automation** and allow Spotify Lyrics to access Spotify.
 - **Wrong or mistimed lyrics:** LRCLIB may have a different recording or inaccurate timestamps. The app uses provider timing without generating its own alignment.
 - **App doesn't start at login:** Check **System Settings → General → Login Items**, and keep the app in a permanent location. Login-item registration can be affected by macOS settings.

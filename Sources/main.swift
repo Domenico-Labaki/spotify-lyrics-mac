@@ -32,6 +32,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private let queue = DispatchQueue(label: "spotify.read")
     private var reading = false
     private var currentID: String?
+    private var currentTitle = ""
+    private var accentColor: NSColor?
     private var lines: [Line] = []
     private var request: URLSessionDataTask?
     private var artworkRequest: URLSessionDataTask?
@@ -128,6 +130,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
                 guard let track, !track.id.isEmpty else { self.clear(); return }
                 if self.currentID != track.id {
                     self.currentID = track.id
+                    self.currentTitle = track.title
+                    self.accentColor = nil
                     self.lines = []
                     self.item.button?.title = "♫"
                     self.lyricLabel.stringValue = ""
@@ -143,7 +147,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     }
 
     private func clear() {
-        request?.cancel(); request = nil; artworkRequest?.cancel(); currentID = nil; lines = []; sampledPosition = nil
+        request?.cancel(); request = nil; artworkRequest?.cancel(); currentID = nil; currentTitle = ""; accentColor = nil; lines = []; sampledPosition = nil
         background?.isHidden = true
         item.length = NSStatusItem.variableLength
         item.button?.title = "♫"
@@ -202,6 +206,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         if let data = cache.get(kind: "artwork", key: track.artworkURL),
            let colors = ArtworkColors.extract(data) {
             background.colors = colors.map { $0.cgColor }
+            accentColor = colors.first
             return
         }
         guard let url = URL(string: track.artworkURL), url.scheme == "https",
@@ -214,6 +219,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self, self.currentID == track.id else { return }
                 self.background.colors = colors.map { $0.cgColor }
+                self.accentColor = colors.first
             }
         }
         artworkRequest?.resume()
@@ -221,12 +227,13 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
 
     private func show(position: Double) {
         let index = lines.lastIndex(where: { $0.time <= position })
-        let text = index.map { lines[$0].text } ?? ""
+        let opening = OpeningDisplay.showTitle(lines: lines, position: position) && !currentTitle.isEmpty
+        let text = opening ? currentTitle : (index.map { lines[$0].text } ?? "")
         guard let button = item.button else { return }
-        item.length = lines.isEmpty ? NSStatusItem.variableLength : 320
+        item.length = lines.isEmpty && !opening ? NSStatusItem.variableLength : 320
         background.frame = button.bounds.insetBy(dx: 2, dy: 0)
         backgroundMask.frame = background.bounds
-        background.isHidden = lines.isEmpty
+        background.isHidden = lines.isEmpty && !opening
         let title = text.isEmpty ? "♫" : text
         if displayedText != title {
             if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
@@ -265,12 +272,18 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         }
         guard !text.isEmpty else { lyricLabel.isHidden = true; return }
         lyricLabel.isHidden = false
+        if opening, let accent = accentColor?.usingColorSpace(.sRGB) {
+            let dark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            lyricLabel.textColor = accent.withAlphaComponent(1).blended(withFraction: dark ? 0.4 : 0.5, of: dark ? .white : .black) ?? .labelColor
+        } else {
+            lyricLabel.textColor = .labelColor
+        }
         let font = lyricLabel.font ?? NSFont.menuBarFont(ofSize: 0)
         let measured = ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
         let visible = max(1, lyricClip.bounds.width)
         let overflow = max(0, measured - visible)
         var progress = 0.0
-        if overflow > 0, let index, index + 1 < lines.count,
+        if overflow > 0, !opening, let index, index + 1 < lines.count,
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let start = lines[index].time
             let end = lines[index + 1].time

@@ -15,3 +15,14 @@ precondition(lines[1].text == "你好、世界!" && lines[3].text == "你好、�
 precondition(lines[2].text == "Cafe\u{301} — [love] + ♥")
 precondition(lines[4].text.isEmpty)
 print("Unicode URL encoding and timed lyrics checks passed")
+let intro = [Line(time: 0, text: "♪"), Line(time: 12, text: "♫"), Line(time: 20, text: "Hello")]
+precondition(OpeningDisplay.showTitle(lines: intro, position: 10))
+precondition(!OpeningDisplay.showTitle(lines: intro, position: 20))
+precondition(!OpeningDisplay.showTitle(lines: [Line(time: 0, text: "Hello")], position: 0))
+precondition(OpeningDisplay.showTitle(lines: [], position: 4))
+precondition(OpeningDisplay.showTitle(lines: [], position: 16))
+precondition(OpeningDisplay.showTitle(lines: [], position: 4))
+precondition(!OpeningDisplay.isInstrumental("I love you 🎵"))
+print("Opening title checks passed")
+
+precondition(OpeningDisplay.showTitle(lines: [Line(time: 0, text: "♪")], position: 60))
