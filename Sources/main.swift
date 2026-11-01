@@ -8,7 +8,6 @@ struct Track: Equatable {
     let title: String
     let artist: String
     let album: String
-    let artworkURL: String
     let duration: Double
     let position: Double
     let playing: Bool
@@ -33,12 +32,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private var reading = false
     private var currentID: String?
     private var currentTitle = ""
-    private var accentColor: NSColor?
     private var lines: [Line] = []
     private var request: URLSessionDataTask?
-    private var artworkRequest: URLSessionDataTask?
-    private var background: CAGradientLayer!
-    private var backgroundMask: CAGradientLayer!
     private var timer: Timer?
     private var displayTimer: Timer?
     private var sampledPosition: Double?
@@ -48,13 +43,9 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private var displayedText = ""
     private let script = """
     tell application "Spotify"
-        if player state is not playing then return {"", "", "", "", 0, 0, false, ""}
+        if player state is not playing then return {"", "", "", "", 0, 0, false}
         set t to current track
-        set coverURL to ""
-        try
-            set coverURL to artwork url of t
-        end try
-        return {id of t, name of t, artist of t, album of t, duration of t, player position, true, coverURL}
+        return {id of t, name of t, artist of t, album of t, duration of t, player position, true}
     end tell
     """
 
@@ -65,24 +56,13 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         item.button?.toolTip = "Spotify Lyrics"
         if let button = item.button {
             button.wantsLayer = true
-            background = CAGradientLayer()
-            background.startPoint = CGPoint(x: 0, y: 0.5)
-            background.endPoint = CGPoint(x: 1, y: 0.5)
-            background.cornerRadius = 6
-            backgroundMask = CAGradientLayer()
-            backgroundMask.startPoint = CGPoint(x: 0, y: 0.5)
-            backgroundMask.endPoint = CGPoint(x: 1, y: 0.5)
-            backgroundMask.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
-            backgroundMask.locations = [0, 0.12, 0.88, 1]
-            background.mask = backgroundMask
-            background.isHidden = true
-            button.layer?.insertSublayer(background, at: 0)
-            lyricClip = PassthroughClip(frame: button.bounds.insetBy(dx: 8, dy: 0))
+            lyricClip = PassthroughClip(frame: .zero)
             lyricClip.autoresizingMask = [.width, .height]
             lyricClip.wantsLayer = true
             lyricClip.layer?.masksToBounds = true
             lyricLabel = NSTextField(labelWithString: "")
             lyricLabel.font = button.font ?? NSFont.menuBarFont(ofSize: 0)
+            lyricLabel.textColor = .white
             lyricLabel.alignment = .left
             lyricLabel.lineBreakMode = .byClipping
             lyricLabel.wantsLayer = true
@@ -120,24 +100,23 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             var error: NSDictionary?
             let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
             let track: Track?
-            if let r = result, r.numberOfItems == 8, r.atIndex(7)?.booleanValue == true {
-                track = Track(id: r.atIndex(1)?.stringValue ?? "", title: r.atIndex(2)?.stringValue ?? "", artist: r.atIndex(3)?.stringValue ?? "", album: r.atIndex(4)?.stringValue ?? "", artworkURL: r.atIndex(8)?.stringValue ?? "", duration: Double(r.atIndex(5)?.int32Value ?? 0) / 1000, position: r.atIndex(6)?.doubleValue ?? 0, playing: true)
+            if let r = result, r.numberOfItems == 7, r.atIndex(7)?.booleanValue == true {
+                track = Track(id: r.atIndex(1)?.stringValue ?? "", title: r.atIndex(2)?.stringValue ?? "", artist: r.atIndex(3)?.stringValue ?? "", album: r.atIndex(4)?.stringValue ?? "", duration: Double(r.atIndex(5)?.int32Value ?? 0) / 1000, position: r.atIndex(6)?.doubleValue ?? 0, playing: true)
             } else { track = nil }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.reading = false
                 if let error { self.item.button?.toolTip = "Spotify Lyrics: \(error[NSAppleScript.errorMessage] ?? "Automation error")" }
                 guard let track, !track.id.isEmpty else { self.clear(); return }
+                self.item.button?.toolTip = track.title
                 if self.currentID != track.id {
                     self.currentID = track.id
                     self.currentTitle = track.title
-                    self.accentColor = nil
                     self.lines = []
                     self.item.button?.title = "♫"
                     self.lyricLabel.stringValue = ""
                     self.displayedText = ""
                     self.fetch(track)
-                    self.fetchArtwork(track)
                 }
                 self.sampledPosition = track.position
                 self.sampledAt = Date()
@@ -147,11 +126,11 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     }
 
     private func clear() {
-        request?.cancel(); request = nil; artworkRequest?.cancel(); currentID = nil; currentTitle = ""; accentColor = nil; lines = []; sampledPosition = nil
-        background?.isHidden = true
+        request?.cancel(); request = nil; currentID = nil; currentTitle = ""; lines = []; sampledPosition = nil
         item.length = NSStatusItem.variableLength
         item.button?.title = "♫"
         lyricLabel?.stringValue = ""
+        item.button?.toolTip = "Spotify Lyrics"
         displayedText = ""
     }
 
@@ -162,7 +141,6 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             let cached = LyricsText.parse(raw)
             if !cached.isEmpty {
                 lines = cached
-                item.button?.toolTip = "Spotify Lyrics"
                 return
             }
         }
@@ -174,7 +152,6 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
                   let data, let results = try? JSONDecoder().decode([LyricsResult].self, from: data) else {
                 DispatchQueue.main.async {
                     guard let self, self.currentID == track.id else { return }
-                    self.item.button?.toolTip = "Lyrics service unavailable; retrying shortly"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                         guard let self, self.currentID == track.id else { return }
                         self.fetch(track)
@@ -193,36 +170,9 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self, self.currentID == track.id else { return }
                 self.lines = parsed
-                self.item.button?.toolTip = parsed.isEmpty ? "No timed lyrics found" : "Spotify Lyrics"
             }
         }
         request?.resume()
-    }
-
-    private func fetchArtwork(_ track: Track) {
-        artworkRequest?.cancel()
-        background.colors = [NSColor.labelColor.withAlphaComponent(0.04).cgColor,
-                             NSColor.labelColor.withAlphaComponent(0.025).cgColor]
-        if let data = cache.get(kind: "artwork", key: track.artworkURL),
-           let colors = ArtworkColors.extract(data) {
-            background.colors = colors.map { $0.cgColor }
-            accentColor = colors.first
-            return
-        }
-        guard let url = URL(string: track.artworkURL), url.scheme == "https",
-              let host = url.host?.lowercased(), host == "scdn.co" || host.hasSuffix(".scdn.co") else { return }
-        artworkRequest = URLSession.shared.dataTask(with: url) { [weak self] data, response, _ in
-            guard let data, data.count <= 5_000_000,
-                  let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let colors = ArtworkColors.extract(data) else { return }
-            self?.cache.put(data, kind: "artwork", key: track.artworkURL)
-            DispatchQueue.main.async {
-                guard let self, self.currentID == track.id else { return }
-                self.background.colors = colors.map { $0.cgColor }
-                self.accentColor = colors.first
-            }
-        }
-        artworkRequest?.resume()
     }
 
     private func show(position: Double) {
@@ -231,9 +181,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         let text = opening ? currentTitle : (index.map { lines[$0].text } ?? "")
         guard let button = item.button else { return }
         item.length = lines.isEmpty && !opening ? NSStatusItem.variableLength : 320
-        background.frame = button.bounds.insetBy(dx: 2, dy: 0)
-        backgroundMask.frame = background.bounds
-        background.isHidden = lines.isEmpty && !opening
+        lyricClip.frame = NSRect(x: 8, y: 0, width: max(0, button.bounds.width - 16), height: button.bounds.height)
         let title = text.isEmpty ? "♫" : text
         if displayedText != title {
             if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
@@ -268,16 +216,9 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             displayedText = title
             button.title = text.isEmpty ? "♫" : ""
             lyricLabel.stringValue = text
-            if !text.isEmpty { button.toolTip = text }
         }
         guard !text.isEmpty else { lyricLabel.isHidden = true; return }
         lyricLabel.isHidden = false
-        if opening, let accent = accentColor?.usingColorSpace(.sRGB) {
-            let dark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            lyricLabel.textColor = accent.withAlphaComponent(1).blended(withFraction: dark ? 0.4 : 0.5, of: dark ? .white : .black) ?? .labelColor
-        } else {
-            lyricLabel.textColor = .labelColor
-        }
         let font = lyricLabel.font ?? NSFont.menuBarFont(ofSize: 0)
         let measured = ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
         let visible = max(1, lyricClip.bounds.width)
@@ -285,15 +226,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         var progress = 0.0
         if overflow > 0, !opening, let index, index + 1 < lines.count,
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            let start = lines[index].time
-            let end = lines[index + 1].time
-            let duration = end - start
-            if duration > 0 {
-                // Hold briefly at each end, then traverse using provider timing.
-                let lead = min(0.5, duration * 0.15)
-                let tail = min(0.5, duration * 0.15)
-                progress = min(1, max(0, (position - start - lead) / max(0.01, duration - lead - tail)))
-            }
+            progress = LyricScroll.progress(position: position, start: lines[index].time,
+                                            end: lines[index + 1].time)
         }
         lyricLabel.alignment = overflow > 0 ? .left : .center
         let labelHeight = lyricLabel.intrinsicContentSize.height

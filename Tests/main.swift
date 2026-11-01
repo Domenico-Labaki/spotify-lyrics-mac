@@ -26,3 +26,10 @@ precondition(!OpeningDisplay.isInstrumental("I love you 🎵"))
 print("Opening title checks passed")
 
 precondition(OpeningDisplay.showTitle(lines: [Line(time: 0, text: "♪")], position: 60))
+
+precondition(LyricScroll.progress(position: 0, start: 0, end: 10) == 0)
+precondition(LyricScroll.progress(position: 8.5, start: 0, end: 10) == 1)
+precondition(LyricScroll.progress(position: 1.7, start: 0, end: 2) == 1)
+precondition(LyricScroll.progress(position: 1.5, start: 0, end: 2) < 1)
+precondition(LyricScroll.progress(position: 5, start: 5, end: 5) == 0)
+print("Lyric scrolling timing checks passed")

@@ -5,17 +5,17 @@ A small native menu bar app that displays the current lyric line while Spotify p
 ## Features
 
 - Displays provider-timed lyrics in a fixed-width menu bar item, with the song title when lyrics are unavailable or during a recognized instrumental intro.
-- Animates transitions between lines and scrolls long lines during their available time. macOS Reduce Motion disables these animations.
-- Tints the lyric background with a subtle, translucent gradient based on the album cover.
+- Animates transitions and scrolls long lines to their end before the next line. macOS Reduce Motion disables these animations.
+- Shows the current song title when you hover over the lyrics.
 - Shows the song title when timed lyrics are unavailable; collapses to a music note when Spotify is paused or closed.
-- Caches successful lyrics and artwork locally for 30 days, up to 200 entries per cache; temporary lookup failures are retried while the track is playing.
+- Caches successful lyrics locally for 30 days, up to 200 entries; temporary lookup failures are retried while the track is playing.
 - Requests registration as a login item when launched.
 
 ## Requirements
 
 - An Apple Silicon Mac with macOS 26 or later for the supplied release build.
 - The Spotify desktop app, running and playing music. Spotify Free works; browser playback and other devices are not supported.
-- An internet connection to fetch uncached lyrics and artwork.
+- An internet connection to fetch uncached lyrics.
 
 ## Install
 
@@ -28,19 +28,19 @@ The release is an **ad-hoc signed, non-notarized development build**, not an App
 
 ## How it works
 
-Spotify's AppleScript interface supplies the track metadata, playback state, position and album artwork URL. The app searches [LRCLIB](https://lrclib.net/) for existing timestamped lyrics and compares those timestamps with playback position. It does not generate or align timestamps, capture audio, or use the Spotify Web API. Only timed results are displayed.
+Spotify's AppleScript interface supplies the track metadata, playback state and position. The app searches [LRCLIB](https://lrclib.net/) for existing timestamped lyrics and compares those timestamps with playback position. It does not generate or align timestamps, capture audio, or use the Spotify Web API. Only timed results are displayed.
 
 The lyric item can be moved using the macOS menu bar rearrangement gesture: hold **Command** and drag the item. macOS controls available menu bar space, so items may be hidden if the bar is crowded.
 
 ## Privacy and local data
 
-The app sends the current track title, artist and album to LRCLIB for lookup, and downloads album artwork from Spotify's image host. It reads playback metadata locally through macOS Automation. It does not require a Spotify login within the app or collect analytics.
+The app sends the current track title, artist and album to LRCLIB for lookup. It reads playback metadata locally through macOS Automation. It does not require a Spotify login within the app or collect analytics.
 
-Cached lyric text and artwork are stored in `~/Library/Caches/SpotifyLyrics/`. The app does not cache failed lookups. You can quit the app and delete this folder to clear the cache; macOS may also clear cache files. Lyrics and artwork availability and timing depend on their providers.
+Cached lyric text is stored in `~/Library/Caches/SpotifyLyrics/`. The app does not cache failed lookups. You can quit the app and delete this folder to clear the cache; macOS may also clear cache files. Lyric availability and timing depend on the provider.
 
 ## Troubleshooting
 
-- **Song title or ♪ appears:** Spotify may be paused, the current line may be empty, timed lyrics may not be available, or the lyrics service may be temporarily unavailable. Hover over the item for its status. Temporary service errors are retried every five seconds while the same track plays.
+- **Song title or ♪ appears:** Spotify may be paused, the current line may be empty, timed lyrics may not be available, or the lyrics service may be temporarily unavailable. Hover over the item to see the song title. Temporary service errors are retried every five seconds while the same track plays.
 - **No permission prompt or no playback data:** Check **System Settings → Privacy & Security → Automation** and allow Spotify Lyrics to access Spotify.
 - **Wrong or mistimed lyrics:** LRCLIB may have a different recording or inaccurate timestamps. The app uses provider timing without generating its own alignment.
 - **App doesn't start at login:** Check **System Settings → General → Login Items**, and keep the app in a permanent location. Login-item registration can be affected by macOS settings.

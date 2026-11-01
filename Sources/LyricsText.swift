@@ -61,3 +61,14 @@ enum OpeningDisplay {
         return position < first.time
     }
 }
+
+// Finish at 85% of the line's duration so the ending stays readable.
+enum LyricScroll {
+    static func progress(position: Double, start: Double, end: Double) -> Double {
+        let duration = end - start
+        guard duration > 0 else { return 0 }
+        let lead = min(0.5, duration * 0.1)
+        let finish = duration * 0.85
+        return min(1, max(0, (position - start - lead) / max(0.001, finish - lead)))
+    }
+}
