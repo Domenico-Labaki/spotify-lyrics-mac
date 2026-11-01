@@ -4,9 +4,9 @@ A small native menu bar app that displays the current lyric line while Spotify p
 
 ## Features
 
-- Displays provider-timed lyrics in a fixed-width menu bar item, with the song title when lyrics are unavailable or during a recognized instrumental intro.
+- Displays provider-timed lyrics in a fixed-width menu bar item, with the song title and artist when lyrics are unavailable or during a recognized instrumental intro.
 - Animates transitions and scrolls long lines to their end before the next line. macOS Reduce Motion disables these animations.
-- Shows the current song title when you hover over the lyrics.
+- Replaces the lyrics with the song title and artist while you hover over them.
 - Shows the song title when timed lyrics are unavailable; collapses to a music note when Spotify is paused or closed.
 - Caches successful lyrics locally for 30 days, up to 200 entries; temporary lookup failures are retried while the track is playing.
 - Requests registration as a login item when launched.
@@ -40,7 +40,7 @@ Cached lyric text is stored in `~/Library/Caches/SpotifyLyrics/`. The app does n
 
 ## Troubleshooting
 
-- **Song title or ♪ appears:** Spotify may be paused, the current line may be empty, timed lyrics may not be available, or the lyrics service may be temporarily unavailable. Hover over the item to see the song title. Temporary service errors are retried every five seconds while the same track plays.
+- **Song title or ♪ appears:** Spotify may be paused, the current line may be empty, timed lyrics may not be available, or the lyrics service may be temporarily unavailable. Hover over the lyrics to see the song title and artist. Temporary service errors are retried every five seconds while the same track plays.
 - **No permission prompt or no playback data:** Check **System Settings → Privacy & Security → Automation** and allow Spotify Lyrics to access Spotify.
 - **Wrong or mistimed lyrics:** LRCLIB may have a different recording or inaccurate timestamps. The app uses provider timing without generating its own alignment.
 - **App doesn't start at login:** Check **System Settings → General → Login Items**, and keep the app in a permanent location. Login-item registration can be affected by macOS settings.

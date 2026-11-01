@@ -22,6 +22,20 @@ struct LyricsResult: Decodable {
 }
 
 final class PassthroughClip: NSView {
+    var onHover: ((Bool) -> Void)?
+    private var hoverTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let tracking = NSTrackingArea(rect: .zero,
+                                      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+        addTrackingArea(tracking)
+        hoverTracking = tracking
+    }
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
@@ -32,6 +46,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private var reading = false
     private var currentID: String?
     private var currentTitle = ""
+    private var currentArtist = ""
+    private var isHovering = false
     private var lines: [Line] = []
     private var request: URLSessionDataTask?
     private var timer: Timer?
@@ -53,11 +69,17 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.autosaveName = "SpotifyLyrics"
         item.button?.title = "♫"
-        item.button?.toolTip = "Spotify Lyrics"
         if let button = item.button {
             button.wantsLayer = true
             lyricClip = PassthroughClip(frame: .zero)
             lyricClip.autoresizingMask = [.width, .height]
+            lyricClip.onHover = { [weak self] hovering in
+                guard let self else { return }
+                self.isHovering = hovering
+                if let position = self.sampledPosition {
+                    self.show(position: position + Date().timeIntervalSince(self.sampledAt))
+                }
+            }
             lyricClip.wantsLayer = true
             lyricClip.layer?.masksToBounds = true
             lyricLabel = NSTextField(labelWithString: "")
@@ -106,12 +128,11 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.reading = false
-                if let error { self.item.button?.toolTip = "Spotify Lyrics: \(error[NSAppleScript.errorMessage] ?? "Automation error")" }
                 guard let track, !track.id.isEmpty else { self.clear(); return }
-                self.item.button?.toolTip = track.title
                 if self.currentID != track.id {
                     self.currentID = track.id
                     self.currentTitle = track.title
+                    self.currentArtist = track.artist
                     self.lines = []
                     self.item.button?.title = "♫"
                     self.lyricLabel.stringValue = ""
@@ -126,11 +147,10 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     }
 
     private func clear() {
-        request?.cancel(); request = nil; currentID = nil; currentTitle = ""; lines = []; sampledPosition = nil
+        request?.cancel(); request = nil; currentID = nil; currentTitle = ""; currentArtist = ""; isHovering = false; lines = []; sampledPosition = nil
         item.length = NSStatusItem.variableLength
         item.button?.title = "♫"
         lyricLabel?.stringValue = ""
-        item.button?.toolTip = "Spotify Lyrics"
         displayedText = ""
     }
 
@@ -178,7 +198,9 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private func show(position: Double) {
         let index = lines.lastIndex(where: { $0.time <= position })
         let opening = OpeningDisplay.showTitle(lines: lines, position: position) && !currentTitle.isEmpty
-        let text = opening ? currentTitle : (index.map { lines[$0].text } ?? "")
+        let showTrack = (opening || isHovering) && !currentTitle.isEmpty
+        let trackDescription = currentArtist.isEmpty ? currentTitle : "\(currentTitle) — \(currentArtist)"
+        let text = showTrack ? trackDescription : (index.map { lines[$0].text } ?? "")
         guard let button = item.button else { return }
         item.length = lines.isEmpty && !opening ? NSStatusItem.variableLength : 320
         lyricClip.frame = NSRect(x: 8, y: 0, width: max(0, button.bounds.width - 16), height: button.bounds.height)
@@ -224,16 +246,17 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         let visible = max(1, lyricClip.bounds.width)
         let overflow = max(0, measured - visible)
         var progress = 0.0
-        if overflow > 0, !opening, let index, index + 1 < lines.count,
+        if overflow > 0, !showTrack, let index, index + 1 < lines.count,
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             progress = LyricScroll.progress(position: position, start: lines[index].time,
                                             end: lines[index + 1].time)
         }
-        lyricLabel.alignment = overflow > 0 ? .left : .center
+        lyricLabel.alignment = overflow > 0 && !showTrack ? .left : .center
+        lyricLabel.lineBreakMode = showTrack ? .byTruncatingTail : .byClipping
         let labelHeight = lyricLabel.intrinsicContentSize.height
         lyricLabel.frame = NSRect(x: -overflow * progress,
                                   y: (lyricClip.bounds.height - labelHeight) / 2,
-                                  width: max(measured, visible), height: labelHeight)
+                                  width: showTrack ? visible : max(measured, visible), height: labelHeight)
     }
 
 }
