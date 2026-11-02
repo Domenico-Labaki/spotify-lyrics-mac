@@ -8,14 +8,15 @@ A small native menu bar app that displays the current lyric line while Spotify p
 - Animates transitions and scrolls long lines to their end before the next line. macOS Reduce Motion disables these animations.
 - Replaces the lyrics with the song title and artist while you hover over them.
 - Shows the song title when timed lyrics are unavailable; collapses to a music note when Spotify is paused or closed.
-- Caches successful lyrics locally for 30 days, up to 200 entries; temporary lookup failures are retried while the track is playing.
+- Colors the song title and artist with an album-art accent gradient and a repeating shimmer; Reduce Motion disables the shimmer.
+- Caches successful lyrics and artwork locally for 30 days, up to 200 entries each; temporary lookup failures are retried while the track is playing.
 - Requests registration as a login item when launched.
 
 ## Requirements
 
 - An Apple Silicon Mac with macOS 26 or later for the supplied release build.
 - The Spotify desktop app, running and playing music. Spotify Free works; browser playback and other devices are not supported.
-- An internet connection to fetch uncached lyrics.
+- An internet connection to fetch uncached lyrics and album artwork.
 
 ## Install
 
@@ -28,15 +29,15 @@ The release is an **ad-hoc signed, non-notarized development build**, not an App
 
 ## How it works
 
-Spotify's AppleScript interface supplies the track metadata, playback state and position. The app searches [LRCLIB](https://lrclib.net/) for existing timestamped lyrics and compares those timestamps with playback position. It does not generate or align timestamps, capture audio, or use the Spotify Web API. Only timed results are displayed.
+Spotify's AppleScript interface supplies the track metadata, playback state, position and album artwork URL. The app searches [LRCLIB](https://lrclib.net/) for existing timestamped lyrics and compares those timestamps with playback position. It does not generate or align timestamps, capture audio, or use the Spotify Web API. Only timed results are displayed.
 
 The lyric item can be moved using the macOS menu bar rearrangement gesture: hold **Command** and drag the item. macOS controls available menu bar space, so items may be hidden if the bar is crowded.
 
 ## Privacy and local data
 
-The app sends the current track title, artist and album to LRCLIB for lookup. It reads playback metadata locally through macOS Automation. It does not require a Spotify login within the app or collect analytics.
+The app sends the current track title, artist and album to LRCLIB for lookup. It reads playback metadata locally through macOS Automation and downloads album artwork from Spotify’s image host. It does not require a Spotify login within the app or collect analytics.
 
-Cached lyric text is stored in `~/Library/Caches/SpotifyLyrics/`. The app does not cache failed lookups. You can quit the app and delete this folder to clear the cache; macOS may also clear cache files. Lyric availability and timing depend on the provider.
+Cached lyric text and artwork are stored in `~/Library/Caches/SpotifyLyrics/`. The app does not cache failed lookups. You can quit the app and delete this folder to clear the cache; macOS may also clear cache files. Lyric availability and timing depend on the provider.
 
 ## Troubleshooting
 

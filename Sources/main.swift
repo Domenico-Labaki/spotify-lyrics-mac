@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import QuartzCore
+import CoreText
 import ServiceManagement
 
 struct Track: Equatable {
@@ -8,6 +9,7 @@ struct Track: Equatable {
     let title: String
     let artist: String
     let album: String
+    let artworkURL: String
     let duration: Double
     let position: Double
     let playing: Bool
@@ -39,6 +41,61 @@ final class PassthroughClip: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+// Draw a single continuous gradient through title glyphs, avoiding repeating patterns.
+final class GradientLabel: NSTextField {
+    var gradientColors: [NSColor]? {
+        didSet { if oldValue != gradientColors { needsDisplay = true } }
+    }
+    var shimmerPhase: CGFloat? {
+        didSet { if oldValue != shimmerPhase { needsDisplay = true } }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let colors = gradientColors, colors.count >= 2,
+              let context = NSGraphicsContext.current?.cgContext,
+              let left = colors[0].usingColorSpace(.sRGB), let right = colors[1].usingColorSpace(.sRGB),
+              let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                        colors: [left.cgColor, right.cgColor] as CFArray, locations: [0, 1]) else {
+            super.draw(dirtyRect)
+            return
+        }
+        let font = self.font ?? NSFont.menuBarFont(ofSize: 0)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+        var line = CTLineCreateWithAttributedString(NSAttributedString(string: stringValue, attributes: attributes))
+        if lineBreakMode == .byTruncatingTail {
+            let token = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attributes))
+            line = CTLineCreateTruncatedLine(line, Double(bounds.width), .end, token) ?? line
+        }
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        let x = alignment == .center ? max(0, (bounds.width - width) / 2) : 0
+        context.saveGState()
+        if isFlipped {
+            context.translateBy(x: 0, y: bounds.height)
+            context.scaleBy(x: 1, y: -1)
+        }
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(x: x, y: (bounds.height - ascent - descent) / 2 + descent)
+        context.setTextDrawingMode(.clip)
+        CTLineDraw(line, context)
+        context.drawLinearGradient(gradient, start: CGPoint(x: x, y: 0),
+                                   end: CGPoint(x: x + max(width, 1), y: 0),
+                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        if let phase = shimmerPhase,
+           let highlight = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                      colors: [NSColor.white.withAlphaComponent(0).cgColor,
+                                               NSColor.white.withAlphaComponent(0.9).cgColor,
+                                               NSColor.white.withAlphaComponent(0).cgColor] as CFArray,
+                                      locations: [0, 0.5, 1]) {
+            let center = x + max(width, 1) * phase
+            let band = max(8, width * 0.18)
+            context.drawLinearGradient(highlight, start: CGPoint(x: center - band, y: 0),
+                                       end: CGPoint(x: center + band, y: 0), options: [])
+        }
+        context.restoreGState()
+    }
+}
+
 final class LyricsApp: NSObject, NSApplicationDelegate {
     private let cache = TrackCache()
     private var item: NSStatusItem!
@@ -50,18 +107,24 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private var isHovering = false
     private var lines: [Line] = []
     private var request: URLSessionDataTask?
+    private var artworkRequest: URLSessionDataTask?
+    private var titleColors: [NSColor]?
     private var timer: Timer?
     private var displayTimer: Timer?
     private var sampledPosition: Double?
     private var sampledAt = Date()
     private var lyricClip: PassthroughClip!
-    private var lyricLabel: NSTextField!
+    private var lyricLabel: GradientLabel!
     private var displayedText = ""
     private let script = """
     tell application "Spotify"
-        if player state is not playing then return {"", "", "", "", 0, 0, false}
+        if player state is not playing then return {"", "", "", "", 0, 0, false, ""}
         set t to current track
-        return {id of t, name of t, artist of t, album of t, duration of t, player position, true}
+        set coverURL to ""
+        try
+            set coverURL to artwork url of t
+        end try
+        return {id of t, name of t, artist of t, album of t, duration of t, player position, true, coverURL}
     end tell
     """
 
@@ -82,7 +145,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             }
             lyricClip.wantsLayer = true
             lyricClip.layer?.masksToBounds = true
-            lyricLabel = NSTextField(labelWithString: "")
+            lyricLabel = GradientLabel(labelWithString: "")
             lyricLabel.font = button.font ?? NSFont.menuBarFont(ofSize: 0)
             lyricLabel.textColor = .white
             lyricLabel.alignment = .left
@@ -122,8 +185,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             var error: NSDictionary?
             let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
             let track: Track?
-            if let r = result, r.numberOfItems == 7, r.atIndex(7)?.booleanValue == true {
-                track = Track(id: r.atIndex(1)?.stringValue ?? "", title: r.atIndex(2)?.stringValue ?? "", artist: r.atIndex(3)?.stringValue ?? "", album: r.atIndex(4)?.stringValue ?? "", duration: Double(r.atIndex(5)?.int32Value ?? 0) / 1000, position: r.atIndex(6)?.doubleValue ?? 0, playing: true)
+            if let r = result, r.numberOfItems == 8, r.atIndex(7)?.booleanValue == true {
+                track = Track(id: r.atIndex(1)?.stringValue ?? "", title: r.atIndex(2)?.stringValue ?? "", artist: r.atIndex(3)?.stringValue ?? "", album: r.atIndex(4)?.stringValue ?? "", artworkURL: r.atIndex(8)?.stringValue ?? "", duration: Double(r.atIndex(5)?.int32Value ?? 0) / 1000, position: r.atIndex(6)?.doubleValue ?? 0, playing: true)
             } else { track = nil }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -138,6 +201,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
                     self.lyricLabel.stringValue = ""
                     self.displayedText = ""
                     self.fetch(track)
+                    self.fetchArtwork(track)
                 }
                 self.sampledPosition = track.position
                 self.sampledAt = Date()
@@ -147,7 +211,7 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     }
 
     private func clear() {
-        request?.cancel(); request = nil; currentID = nil; currentTitle = ""; currentArtist = ""; isHovering = false; lines = []; sampledPosition = nil
+        request?.cancel(); request = nil; artworkRequest?.cancel(); artworkRequest = nil; titleColors = nil; currentID = nil; currentTitle = ""; currentArtist = ""; isHovering = false; lines = []; sampledPosition = nil
         item.length = NSStatusItem.variableLength
         item.button?.title = "♫"
         lyricLabel?.stringValue = ""
@@ -195,6 +259,28 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         request?.resume()
     }
 
+    private func fetchArtwork(_ track: Track) {
+        artworkRequest?.cancel()
+        titleColors = nil
+        guard let url = URL(string: track.artworkURL), url.scheme == "https",
+              let host = url.host?.lowercased(), host == "scdn.co" || host.hasSuffix(".scdn.co") else { return }
+        if let data = cache.get(kind: "artwork", key: track.artworkURL), let colors = ArtworkColors.extract(data) {
+            titleColors = colors.map { ArtworkColors.displayColor($0) }
+            return
+        }
+        artworkRequest = URLSession.shared.dataTask(with: url) { [weak self] data, response, _ in
+            guard let data, data.count <= 5_000_000,
+                  let response = response as? HTTPURLResponse, response.statusCode == 200,
+                  let colors = ArtworkColors.extract(data) else { return }
+            self?.cache.put(data, kind: "artwork", key: track.artworkURL)
+            DispatchQueue.main.async {
+                guard let self, self.currentID == track.id else { return }
+                self.titleColors = colors.map { ArtworkColors.displayColor($0) }
+            }
+        }
+        artworkRequest?.resume()
+    }
+
     private func show(position: Double) {
         let index = lines.lastIndex(where: { $0.time <= position })
         let opening = OpeningDisplay.showTitle(lines: lines, position: position) && !currentTitle.isEmpty
@@ -208,7 +294,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         if displayedText != title {
             if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
                !lyricLabel.isHidden, !lyricLabel.stringValue.isEmpty, !text.isEmpty {
-                let outgoing = NSTextField(labelWithString: lyricLabel.stringValue)
+                let outgoing = GradientLabel(labelWithString: lyricLabel.stringValue)
+                outgoing.gradientColors = lyricLabel.gradientColors
                 outgoing.font = lyricLabel.font
                 outgoing.textColor = lyricLabel.textColor
                 outgoing.alignment = lyricLabel.alignment
@@ -238,6 +325,13 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             displayedText = title
             button.title = text.isEmpty ? "♫" : ""
             lyricLabel.stringValue = text
+        }
+        lyricLabel.gradientColors = showTrack ? titleColors : nil
+        if showTrack, titleColors != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let cycle = CACurrentMediaTime().truncatingRemainder(dividingBy: 4.5)
+            lyricLabel.shimmerPhase = cycle < 1.4 ? CGFloat(cycle / 1.4) * 1.4 - 0.2 : nil
+        } else {
+            lyricLabel.shimmerPhase = nil
         }
         guard !text.isEmpty else { lyricLabel.isHidden = true; return }
         lyricLabel.isHidden = false
