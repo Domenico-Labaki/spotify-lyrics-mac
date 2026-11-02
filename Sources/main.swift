@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import QuartzCore
 import CoreText
+import OSLog
 import ServiceManagement
 
 struct Track: Equatable {
@@ -113,22 +114,31 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private var displayTimer: Timer?
     private var sampledPosition: Double?
     private var sampledAt = Date()
+    private var widthTracker = MenuBarWidthTracker()
+    private var desiredWidth: CGFloat { widthTracker.width }
+    private var lastWidthCheck = Date.distantPast
+    private var widthCheckInProgress = false
+    private let widthQueue = DispatchQueue(label: "spotify.menubar.measure", qos: .utility)
+    private let widthLogger = Logger(subsystem: "local.spotifylyrics.menubar", category: "width")
+    private var lastWidthDiagnostic = ""
     private var lyricClip: PassthroughClip!
     private var lyricLabel: GradientLabel!
     private var displayedText = ""
     private let script = """
     tell application "Spotify"
-        if player state is not playing then return {"", "", "", "", 0, 0, false, ""}
+        if player state is stopped then return {"", "", "", "", 0, 0, false, ""}
+        set isPlaying to (player state is playing)
         set t to current track
         set coverURL to ""
         try
             set coverURL to artwork url of t
         end try
-        return {id of t, name of t, artist of t, album of t, duration of t, player position, true, coverURL}
+        return {id of t, name of t, artist of t, album of t, duration of t, player position, isPlaying, coverURL}
     end tell
     """
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.removeObject(forKey: "settledMenuBarWidths")
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.autosaveName = "SpotifyLyrics"
         item.button?.title = "♫"
@@ -171,6 +181,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             guard let self, let position = self.sampledPosition else { return }
             self.show(position: position + Date().timeIntervalSince(self.sampledAt))
         }
+        // Request only the permission needed to read menu bar geometry.
+        DispatchQueue.main.async { _ = MenuBarAccessibility.isTrusted(prompt: true) }
         poll()
     }
 
@@ -185,8 +197,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             var error: NSDictionary?
             let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
             let track: Track?
-            if let r = result, r.numberOfItems == 8, r.atIndex(7)?.booleanValue == true {
-                track = Track(id: r.atIndex(1)?.stringValue ?? "", title: r.atIndex(2)?.stringValue ?? "", artist: r.atIndex(3)?.stringValue ?? "", album: r.atIndex(4)?.stringValue ?? "", artworkURL: r.atIndex(8)?.stringValue ?? "", duration: Double(r.atIndex(5)?.int32Value ?? 0) / 1000, position: r.atIndex(6)?.doubleValue ?? 0, playing: true)
+            if let r = result, r.numberOfItems == 8 {
+                track = Track(id: r.atIndex(1)?.stringValue ?? "", title: r.atIndex(2)?.stringValue ?? "", artist: r.atIndex(3)?.stringValue ?? "", album: r.atIndex(4)?.stringValue ?? "", artworkURL: r.atIndex(8)?.stringValue ?? "", duration: Double(r.atIndex(5)?.int32Value ?? 0) / 1000, position: r.atIndex(6)?.doubleValue ?? 0, playing: r.atIndex(7)?.booleanValue ?? false)
             } else { track = nil }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -203,9 +215,14 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
                     self.fetch(track)
                     self.fetchArtwork(track)
                 }
-                self.sampledPosition = track.position
-                self.sampledAt = Date()
-                self.show(position: track.position)
+                if track.playing {
+                    self.sampledPosition = track.position
+                    self.sampledAt = Date()
+                    self.show(position: track.position)
+                } else {
+                    self.sampledPosition = nil
+                    self.showPaused()
+                }
             }
         }
     }
@@ -213,6 +230,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
     private func clear() {
         request?.cancel(); request = nil; artworkRequest?.cancel(); artworkRequest = nil; titleColors = nil; currentID = nil; currentTitle = ""; currentArtist = ""; isHovering = false; lines = []; sampledPosition = nil
         item.length = NSStatusItem.variableLength
+        widthTracker = MenuBarWidthTracker()
+        lastWidthCheck = .distantPast
         item.button?.title = "♫"
         lyricLabel?.stringValue = ""
         displayedText = ""
@@ -281,6 +300,112 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         artworkRequest?.resume()
     }
 
+    private func logWidthStatus(_ status: String) {
+        guard status != lastWidthDiagnostic else { return }
+        lastWidthDiagnostic = status
+        widthLogger.notice("\(status, privacy: .public)")
+    }
+
+    private func requestWidthMeasurement() {
+        let trusted = MenuBarAccessibility.isTrusted(prompt: false)
+        if !trusted { logWidthStatus("Accessibility unavailable; using compact width") }
+        guard !widthCheckInProgress, NSMenu.menuBarVisible(),
+              item.isVisible, let primary = NSScreen.screens.first else { return }
+        widthCheckInProgress = true
+        let top = primary.frame.maxY
+        let screenInfo = NSScreen.screens.map { screen in
+            let frame = screen.frame
+            return MenuBarAccessibility.ScreenInfo(
+                frame: CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height),
+                notchRight: screen.auxiliaryTopRightArea?.minX)
+        }
+        let running = NSWorkspace.shared.runningApplications
+        let ownWindowFrame = item.button?.window.map { window in
+            let frame = window.frame
+            return CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+        }
+        let snapshot = MenuBarAccessibility.Snapshot(
+            ownPID: ProcessInfo.processInfo.processIdentifier,
+            appPIDs: running.map { $0.processIdentifier },
+            statusHostPIDs: running.filter { $0.bundleIdentifier == "com.apple.controlcenter" }.map { $0.processIdentifier },
+            frontPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            allocatedWidth: desiredWidth,
+            ownWindowFrame: ownWindowFrame,
+            screens: screenInfo)
+        widthQueue.async { [weak self] in
+            let measurement = MenuBarAccessibility.measure(snapshot)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.widthCheckInProgress = false
+                guard self.currentID != nil else { return }
+                switch measurement {
+                case .visible(let width, let layout):
+                    self.logWidthStatus("Measured available width: \(width)")
+                    _ = self.widthTracker.update(width, layout: layout)
+                case .hidden:
+                    self.logWidthStatus("Status item hidden; shrinking to recover")
+                    _ = self.widthTracker.itemIsHidden()
+                case .unavailable:
+                    self.logWidthStatus("Menu bar measurement unavailable; using safe recovery")
+                    _ = self.widthTracker.update(nil)
+                }
+            }
+        }
+    }
+
+    private func animateTextTransition() {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        func animation(fromY: CGFloat, toY: CGFloat, fromOpacity: Float, toOpacity: Float) -> CAAnimationGroup {
+            let move = CABasicAnimation(keyPath: "transform.translation.y")
+            move.fromValue = fromY; move.toValue = toY
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = fromOpacity; fade.toValue = toOpacity
+            let group = CAAnimationGroup()
+            group.animations = [move, fade]
+            group.duration = 0.3
+            group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            group.fillMode = .forwards
+            group.isRemovedOnCompletion = false
+            return group
+        }
+        let distance = lyricClip.bounds.height
+        if !lyricLabel.isHidden, !lyricLabel.stringValue.isEmpty {
+            let outgoing = GradientLabel(labelWithString: lyricLabel.stringValue)
+            outgoing.gradientColors = lyricLabel.gradientColors
+            outgoing.font = lyricLabel.font
+            outgoing.textColor = lyricLabel.textColor
+            outgoing.alignment = lyricLabel.alignment
+            outgoing.lineBreakMode = .byClipping
+            outgoing.frame = lyricLabel.frame
+            outgoing.wantsLayer = true
+            lyricClip.addSubview(outgoing, positioned: .below, relativeTo: lyricLabel)
+            outgoing.layer?.add(animation(fromY: 0, toY: distance, fromOpacity: 1, toOpacity: 0), forKey: "outgoing")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { outgoing.removeFromSuperview() }
+        }
+        lyricLabel.layer?.removeAnimation(forKey: "incoming")
+        lyricLabel.layer?.add(animation(fromY: -distance, toY: 0, fromOpacity: 0, toOpacity: 1), forKey: "incoming")
+    }
+
+    private func showPaused() {
+        guard let button = item.button else { return }
+        // Keep the current width; use the stable compact width on a paused launch.
+        if item.length < 0 { item.length = desiredWidth }
+        lyricClip.frame = NSRect(x: 8, y: 0, width: max(0, button.bounds.width - 16), height: button.bounds.height)
+        if displayedText != "⏸︎ Paused" { animateTextTransition() }
+        lyricLabel.gradientColors = nil
+        lyricLabel.shimmerPhase = nil
+        lyricLabel.stringValue = "⏸︎ Paused"
+        lyricLabel.textColor = NSColor.white.withAlphaComponent(0.65)
+        lyricLabel.alignment = .center
+        lyricLabel.lineBreakMode = .byTruncatingTail
+        lyricLabel.isHidden = false
+        let height = lyricLabel.intrinsicContentSize.height
+        lyricLabel.frame = NSRect(x: 0, y: (lyricClip.bounds.height - height) / 2,
+                                 width: lyricClip.bounds.width, height: height)
+        displayedText = "⏸︎ Paused"
+        button.title = ""
+    }
+
     private func show(position: Double) {
         let index = lines.lastIndex(where: { $0.time <= position })
         let opening = OpeningDisplay.showTitle(lines: lines, position: position) && !currentTitle.isEmpty
@@ -288,44 +413,29 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         let trackDescription = currentArtist.isEmpty ? currentTitle : "\(currentTitle) — \(currentArtist)"
         let text = showTrack ? trackDescription : (index.map { lines[$0].text } ?? "")
         guard let button = item.button else { return }
-        item.length = lines.isEmpty && !opening ? NSStatusItem.variableLength : 320
+        if lines.isEmpty && !opening {
+            item.length = NSStatusItem.variableLength
+        } else {
+            let now = Date()
+            if item.length != desiredWidth {
+                item.length = desiredWidth
+                lastWidthCheck = now // Let macOS settle after a resize.
+            } else if now.timeIntervalSince(lastWidthCheck) >= 1.2 {
+                lastWidthCheck = now
+                requestWidthMeasurement()
+            }
+        }
         lyricClip.frame = NSRect(x: 8, y: 0, width: max(0, button.bounds.width - 16), height: button.bounds.height)
         let title = text.isEmpty ? "♫" : text
         if displayedText != title {
-            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
-               !lyricLabel.isHidden, !lyricLabel.stringValue.isEmpty, !text.isEmpty {
-                let outgoing = GradientLabel(labelWithString: lyricLabel.stringValue)
-                outgoing.gradientColors = lyricLabel.gradientColors
-                outgoing.font = lyricLabel.font
-                outgoing.textColor = lyricLabel.textColor
-                outgoing.alignment = lyricLabel.alignment
-                outgoing.lineBreakMode = .byClipping
-                outgoing.frame = lyricLabel.frame
-                outgoing.wantsLayer = true
-                lyricClip.addSubview(outgoing, positioned: .below, relativeTo: lyricLabel)
-                func animation(fromY: CGFloat, toY: CGFloat, fromOpacity: Float, toOpacity: Float) -> CAAnimationGroup {
-                    let move = CABasicAnimation(keyPath: "transform.translation.y")
-                    move.fromValue = fromY; move.toValue = toY
-                    let fade = CABasicAnimation(keyPath: "opacity")
-                    fade.fromValue = fromOpacity; fade.toValue = toOpacity
-                    let group = CAAnimationGroup()
-                    group.animations = [move, fade]
-                    group.duration = 0.3
-                    group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    group.fillMode = .forwards
-                    group.isRemovedOnCompletion = false
-                    return group
-                }
-                let distance = lyricClip.bounds.height
-                outgoing.layer?.add(animation(fromY: 0, toY: distance, fromOpacity: 1, toOpacity: 0), forKey: "outgoing")
-                lyricLabel.layer?.removeAnimation(forKey: "incoming")
-                lyricLabel.layer?.add(animation(fromY: -distance, toY: 0, fromOpacity: 0, toOpacity: 1), forKey: "incoming")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { outgoing.removeFromSuperview() }
+            if !lyricLabel.isHidden, !lyricLabel.stringValue.isEmpty, !text.isEmpty {
+                animateTextTransition()
             }
             displayedText = title
             button.title = text.isEmpty ? "♫" : ""
             lyricLabel.stringValue = text
         }
+        lyricLabel.textColor = .white
         lyricLabel.gradientColors = showTrack ? titleColors : nil
         if showTrack, titleColors != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let cycle = CACurrentMediaTime().truncatingRemainder(dividingBy: 4.5)
