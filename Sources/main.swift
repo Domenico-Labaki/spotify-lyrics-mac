@@ -209,7 +209,6 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
                     self.currentTitle = track.title
                     self.currentArtist = track.artist
                     self.lines = []
-                    self.item.button?.title = "♫"
                     self.lyricLabel.stringValue = ""
                     self.displayedText = ""
                     self.fetch(track)
@@ -312,6 +311,8 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         guard !widthCheckInProgress, NSMenu.menuBarVisible(),
               item.isVisible, let primary = NSScreen.screens.first else { return }
         widthCheckInProgress = true
+        let measuredTrackID = currentID
+        let measuredWidth = item.length
         let top = primary.frame.maxY
         let screenInfo = NSScreen.screens.map { screen in
             let frame = screen.frame
@@ -337,7 +338,10 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.widthCheckInProgress = false
-                guard self.currentID != nil else { return }
+                // Results from before a track change or resize do not describe
+                // the current status-item window.
+                guard self.currentID != nil, self.currentID == measuredTrackID,
+                      self.item.length == measuredWidth, self.desiredWidth == measuredWidth else { return }
                 switch measurement {
                 case .visible(let width, let layout):
                     self.logWidthStatus("Measured available width: \(width)")
@@ -413,17 +417,13 @@ final class LyricsApp: NSObject, NSApplicationDelegate {
         let trackDescription = currentArtist.isEmpty ? currentTitle : "\(currentTitle) — \(currentArtist)"
         let text = showTrack ? trackDescription : (index.map { lines[$0].text } ?? "")
         guard let button = item.button else { return }
-        if lines.isEmpty && !opening {
-            item.length = NSStatusItem.variableLength
-        } else {
-            let now = Date()
-            if item.length != desiredWidth {
-                item.length = desiredWidth
-                lastWidthCheck = now // Let macOS settle after a resize.
-            } else if now.timeIntervalSince(lastWidthCheck) >= 1.2 {
-                lastWidthCheck = now
-                requestWidthMeasurement()
-            }
+        let now = Date()
+        if item.length != desiredWidth {
+            item.length = desiredWidth
+            lastWidthCheck = now // Let macOS settle after a resize.
+        } else if now.timeIntervalSince(lastWidthCheck) >= 1.2 {
+            lastWidthCheck = now
+            requestWidthMeasurement()
         }
         lyricClip.frame = NSRect(x: 8, y: 0, width: max(0, button.bounds.width - 16), height: button.bounds.height)
         let title = text.isEmpty ? "♫" : text

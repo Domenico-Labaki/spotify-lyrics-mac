@@ -80,7 +80,11 @@ struct MenuBarWidthTracker {
         guard candidate != nil else {
             missing += 1
             matching = 0
-            if missing >= 2 { width = min(width, MenuBarWidth.fallback) }
+            // Once a layout has been measured, a transient AX or window
+            // lookup failure is not evidence that the item no longer fits.
+            if missing >= 2 && itemCount == nil && !recovering {
+                width = min(width, MenuBarWidth.fallback)
+            }
             return width
         }
         if missing >= 2 && itemCount == nil && !recovering { width = MenuBarWidth.maximum }

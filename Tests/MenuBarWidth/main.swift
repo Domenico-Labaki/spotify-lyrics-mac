@@ -64,3 +64,17 @@ let visibleWindow = CGRect(x: 976, y: 0, width: 211, height: 33)
 precondition(!StatusItemVisibility.hasMatchingWindow(item: hiddenItem, windows: [shareIcon]))
 precondition(StatusItemVisibility.hasMatchingWindow(item: hiddenItem, windows: [visibleWindow, shareIcon]))
 print("Hidden window detection checks passed")
+
+// Losing geometry briefly during playback must not collapse an established
+// item or prevent it from staying wide when measurements return.
+var intermittent = MenuBarWidthTracker()
+_ = intermittent.update(320, layout: "8,10:1728:956")
+_ = intermittent.update(320, layout: "8,10:1728:956")
+for _ in 0..<10 { precondition(intermittent.update(nil) == 320) }
+precondition(intermittent.update(320, layout: "8,10:1728:956") == 320)
+precondition(intermittent.update(320, layout: "8,10:1728:956") == 320)
+var startup = MenuBarWidthTracker()
+_ = startup.update(nil)
+precondition(startup.update(nil) == MenuBarWidth.fallback)
+precondition(startup.update(320, layout: "8,10:1728:956") == 320)
+print("Intermittent measurement and startup recovery checks passed")
